@@ -115,6 +115,7 @@ class GenericAssistant(object):
         return model, optimizer
         
     def train_model(self, epoch=5):
+        from sklearn.metrics import accuracy_score
         self.model.train()
         loss_fn = nn.CrossEntropyLoss()
         for e in range(epoch):
@@ -127,8 +128,10 @@ class GenericAssistant(object):
                 #torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 self.optimizer.step()
             if (e+1) % 25 == 0:    
-                logging.info(f'E_{e+1} Epoch_loss：{epoch_loss/len(self.train_dl)}')
-        
+                acc = accuracy_score(torch.max(output, dim=1)[1], y)
+                logging.info(f'E_{e+1} Epoch_loss：{epoch_loss/len(self.train_dl):.3f} accuracy:{acc:.2f}')
+        self.save_model()
+
     def save_model(self):
         torch.save(self.model.state_dict(), f"{self.model_name}.h5")
         pickle.dump(self.words, open(f'{self.model_name}_words.pkl', 'wb'))
@@ -141,12 +144,64 @@ class GenericAssistant(object):
         checkpoint = torch.load(f"{self.model_name}.h5")
         self.model.load_state_dict(checkpoint)
 
+    def _clean_up_sentence(self, sentence):
+        sentence_words = nltk.word_tokenize(sentence)
+        sentence_words = [self.lemmatizer.lemmatize(word.lower()) for word in sentence_words]
+        return sentence_words
+
+    def _bag_of_words(self,sentence, words):
+        sentence_words = self._clean_up_sentence(sentence)
+        bag = [0] * len(words)
+        for s in sentence_words:
+            for i, word in enumerate(words):
+                if word == s:bag[i] = 1
+        return np.array(bag)
+
+    def _predict_class(self, sentence):
+        p = self._bag_of_words(sentence, self.words)        
+        res = self.model(torch.tensor(p, dtype=torch.float))
+        #_, res = torch.max(res, dim=0)
+        ERROR_THRESHOLD = 0.8
+        result = [[i, r] for i, r in enumerate(res) if r > ERROR_THRESHOLD]
+        result.sort(key=lambda x: x[1], reverse=True)
+        return_list = []
+        for r in result:
+            return_list.append({'intent': self.classes[r[0]], 'probability': str(r[1])})
+        return return_list
+
+    def _get_response(self, ints, intents_json):
+        try:
+            tag = ints[0]['intent']
+            list_of_intents = intents_json['intents']
+            for i in list_of_intents:
+                if i['tag'] == tag:
+                    result = random.choice(i['responses'])
+                    break
+        except IndexError:
+            result = "I don't understand!" 
+        return result
+
+    def request(self):
+        while True:
+            message = input('>>')
+            if message == 'quit()':break
+            ints = self._predict_class(message)
+
+            if ints[0]['intent'] in self.intent_methods.keys():
+                self.intent_methods[ints[0]['intent']]()
+            else:
+                print(self._get_response(ints, self.intents))
+        print('bye~')
+
     def run(self):
         self.get_training_dataset()
         self.train_dl = self.set_dataloader(5)
         self.model, self.optimizer = self.get_model()
         logging.debug(self.model)
-        self.train_model(250)
+        #self.train_model(150)
+        self.load_model()
+        self.request()
+
 
 if __name__ == '__main__':
     tmpAs = GenericAssistant("intents.json")
