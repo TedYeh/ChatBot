@@ -76,12 +76,12 @@ class GenericAssistant(object):
         random.shuffle(training)
         training = np.array(training)
         
-        self.train_x = list(training[:, 0])
-        self.train_y = list(training[:, 1])
+        self.train_x = list(training[:, 0]) # ["bag", label]
+        self.train_y = list(training[:, 1]) # [bag, "label"]
         #logging.debug(f"{train_x, train_y}")
         
 
-    def set_dataloader(self, batch_sz):
+    def set_dataloader(self, batch_sz): #set dataloader to pass training data
         train_x, train_y = torch.tensor(self.train_x, dtype=torch.float), torch.LongTensor(self.train_y)
         train_data = TensorDataset(train_x, train_y)
         train_sampler = RandomSampler(train_data)
@@ -119,7 +119,7 @@ class GenericAssistant(object):
         self.model.train()
         loss_fn = nn.CrossEntropyLoss()
         for e in range(epoch):
-            epoch_loss = 0
+            epoch_loss, correct, total = 0, 0, 0 
             for step, (x, y) in enumerate(self.train_dl):
                 output = self.model(x)
                 loss = loss_fn(output, y.view(-1))
@@ -127,9 +127,13 @@ class GenericAssistant(object):
                 loss.backward()
                 #torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
                 self.optimizer.step()
+                _, predicted = torch.max(output.data, 1)
+                correct += (predicted == y).sum()
+                total += y.size(0)
             if (e+1) % 25 == 0:    
-                acc = accuracy_score(torch.max(output, dim=1)[1], y)
-                logging.info(f'E_{e+1} Epoch_loss：{epoch_loss/len(self.train_dl):.3f} accuracy:{acc:.2f}')
+                acc = 100 * correct/total
+                total = 0
+                logging.info(f'E_{e+1} Epoch_loss：{epoch_loss/len(self.train_dl):.3f} accuracy:{acc:.2f}%')
         self.save_model()
 
     def save_model(self):
@@ -170,6 +174,7 @@ class GenericAssistant(object):
         return return_list
 
     def _get_response(self, ints, intents_json):
+        result = ''
         try:
             tag = ints[0]['intent']
             list_of_intents = intents_json['intents']
@@ -198,7 +203,7 @@ class GenericAssistant(object):
         self.train_dl = self.set_dataloader(5)
         self.model, self.optimizer = self.get_model()
         logging.debug(self.model)
-        #self.train_model(150)
+        self.train_model(300)
         self.load_model()
         self.request()
 
